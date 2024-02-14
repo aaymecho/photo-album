@@ -14,6 +14,7 @@ RDS_DB_NAME='photogallerydb'
 
 # DynamoDB Table
 DYNAMODB_TABLE='photogallerydb' #whichever you have mention during the setup
+DYNAMODB_USER_TABLE = 'PhotoGalleryUser'
 
 ###### INSERT NEW ENVIRONMENT VARIEABLES HERE ######
 

@@ -1,7 +1,7 @@
 #!flask/bin/python
 import sys, os
 sys.path.append(os.path.abspath(os.path.join('..', 'utils')))
-from env import AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY, AWS_REGION, PHOTOGALLERY_S3_BUCKET_NAME, DYNAMODB_TABLE
+from env import AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY, AWS_REGION, PHOTOGALLERY_S3_BUCKET_NAME, DYNAMODB_TABLE, DYNAMODB_USER_TABLE
 from flask import Flask, jsonify, abort, request, make_response, url_for
 from flask import render_template, redirect
 import time
@@ -13,6 +13,7 @@ from boto3.dynamodb.conditions import Key, Attr
 import pymysql.cursors
 from datetime import datetime
 import pytz
+from flask_bcrypt import Bcrypt
 
 """
     INSERT NEW LIBRARIES HERE (IF NEEDED)
@@ -26,12 +27,15 @@ import pytz
 """
 
 app = Flask(__name__, static_url_path="")
+bcrypt = Bcrypt(app)
 
 dynamodb = boto3.resource('dynamodb', aws_access_key_id=AWS_ACCESS_KEY,
                             aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
                             region_name=AWS_REGION)
 
 table = dynamodb.Table(DYNAMODB_TABLE)
+userTable = dynamodb.Table(DYNAMODB_USER_TABLE)
+
 
 UPLOAD_FOLDER = os.path.join(app.root_path,'static','media')
 ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg'])
@@ -109,6 +113,60 @@ def not_found(error):
 
 
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    return render_template('login.html')
+
+
+@app.route('/confirmemail', methods=['GET', 'POST'])
+
+
+@app.route('/signup', methods=['POST'])
+def signup():
+    if request.method == 'POST':
+        username = request.form['username']
+        email = request.form['email']
+        password = request.form['password']
+
+        # Generate hashed password and hashed username
+        hashedPassword = bcrypt.generate_password_hash(password).decode('utf-8')
+        hashedUsername = bcrypt.generate_password_hash(username).decode('utf-8')
+
+        try:
+            # Attempt to retrieve user by hashed username
+            response = userTable.get_item(
+                Key={
+                    "userID": hashedUsername,
+                    "userEmail": email
+                }
+            )
+            # Check if the user exists by looking for an item in the response
+            if 'Item' in response:
+                app.logger.info("Account with username %s already exists!", username)
+                # Redirect or inform the user that the account exists
+                return render_template('signup.html', error="Username already exists.")
+            else:
+                # If user does not exist, proceed to create a new one
+                userTable.put_item(
+                    Item={
+                        "userID": hashedUsername,
+                        "userEmail": email,
+                        "username": username,
+                        "password": hashedPassword,
+                        "verified": False
+                    }
+                )
+                return redirect(url_for('confirmemail.html'))
+        except Exception as e:
+            app.logger.error("Signup error: %s", str(e))
+            # Handle the exception and inform the user
+            return render_template('signup.html', error="An error occurred during signup.")
+    else:
+        # If it's a GET request, just render the signup page
+        return render_template('signup.html')
+
+
+ 
 @app.route('/', methods=['GET'])
 def home_page():
     """ Home page route.
@@ -120,13 +178,13 @@ def home_page():
     response = table.scan(FilterExpression=Attr('photoID').eq("thumbnail"))
     results = response['Items']
 
-    if len(results) > 0:
-        for index, value in enumerate(results):
-            createdAt = datetime.strptime(str(results[index]['createdAt']), "%Y-%m-%d %H:%M:%S")
-            createdAt_UTC = pytz.timezone("UTC").localize(createdAt)
-            results[index]['createdAt'] = createdAt_UTC.astimezone(pytz.timezone("US/Eastern")).strftime("%B %d, %Y")
+    # if len(results) > 0:
+    #     for index, value in enumerate(results):
+    #         createdAt = datetime.strptime(str(results[index]['createdAt']), "%Y-%m-%d %H:%M:%S")
+    #         createdAt_UTC = pytz.timezone("UTC").localize(createdAt)
+    #         results[in.infodex]['createdAt'] = createdAt_UTC.astimezone(pytz.timezone("US/Eastern")).strftime("%B %d, %Y")
 
-    return render_template('index.html', albums=results)
+    return render_template('login.html', albums=results)
 
 
 
