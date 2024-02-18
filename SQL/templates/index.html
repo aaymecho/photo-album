@@ -7,8 +7,11 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <title>Photo Gallery</title>
     <meta name="viewport" content="width=device-width, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link href='https://fonts.googleapis.com/css?family=Roboto:100,400,700,500,300,300italic' rel='stylesheet' type='text/css'>
-    <link href='https://fonts.googleapis.com/css?family=Droid+Serif:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+    <meta http-equiv="refresh" content="300; url = /" />
+    <link href='https://fonts.googleapis.com/css?family=Roboto:100,400,700,500,300,300italic' rel='stylesheet'
+        type='text/css'>
+    <link href='https://fonts.googleapis.com/css?family=Droid+Serif:400,400italic,700,700italic' rel='stylesheet'
+        type='text/css'>
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
     <link href="/assets/plugins/font-awesome/css/font-awesome.min.css" rel="stylesheet" type="text/css" />
     <link href="/assets/plugins/et-line/et-line.css" rel="stylesheet" type="text/css" />
@@ -18,6 +21,9 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/baguettebox.js/1.10.0/baguetteBox.min.css" />
     <link href="/assets/css/cards-gallery.css" rel="stylesheet" type="text/css" />
     <script type="text/javascript" src="/assets/plugins/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+
 </head>
 <!-- END HEAD -->
 <!-- BEGIN BODY -->
@@ -30,7 +36,8 @@
             <br>
             <center>
                 <h2>Photo Gallery</h2>
-                <br> <a href="/">Home</a> | <a href="/createAlbum">Create Album</a>
+                <br> <a href="/">Home</a> | <a href="/createAlbum">Create Album</a> | <a href="/deleteAccount">Delete
+                    Account</a>
                 <br>
                 <br>
                 <div class="container">
@@ -38,39 +45,104 @@
                         <div class="col-md-12">
                             <div class="blog-grid-content">
                                 <form method='get' action="/album/search">
-                                    <input type="text" name="query" id="query" class="form-control" placeholder="Search albums"> </div>
+                                    <input type="text" name="query" id="query" class="form-control"
+                                        placeholder="Search albums">
+                            </div>
                         </div>
                     </div>
                 </div>
             </center>
             <section class="gallery-block cards-gallery">
                 <div class="container">
-                    <div class="row" style="justify-content: center;"> 
+                    <div class="row" style="justify-content: center;">
                         {% for p in albums %}
 
                         <div class="col-md-6 col-lg-4">
                             <div class="card border-0 transform-on-hover">
-                                <a class="lightbox" href="/album/{{p.albumID}}"> <img src="{{p.thumbnailURL}}" alt="Card Image" class="card-img-top"> </a>
+                                <a class="lightbox" href="/album/{{p.albumID}}"> <img src="{{p.thumbnailURL}}"
+                                        alt="Card Image" class="card-img-top"> </a>
                                 <div class="card-body">
                                     <h6><a href="/album/{{p.albumID}}">{{p.name}}</a></h6>
                                     <p class="text-muted card-text">{{p.description}}</p>
-                                    <p class="text-muted card-text" style="font-style: italic; font-weight: 200 !important">Created on {{p.createdAt}}</p>
+                                    <p class="text-muted card-text"
+                                        style="font-style: italic; font-weight: 200 !important">Created on
+                                        {{p.createdAt}}</p>
+                                        <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#modifyAlbumModal{{p.albumID}}">
+                                            Modify Album
+                                        </button>
                                 </div>
                             </div>
-                        </div> 
+                        </div>
 
-                        {% endfor %} 
+                        <div class="modal fade" id="modifyAlbumModal{{p.albumID}}" tabindex="-1" role="dialog" aria-labelledby="modifyAlbumModalLabel{{p.albumID}}" aria-hidden="true">
+                            <div class="modal-dialog" role="document">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="modifyAlbumModalLabel{{p.albumID}}">Modify Album: {{p.name}}</h5>
+                                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                            <span aria-hidden="true">&times;</span>
+                                        </button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <div class="form-group">
+                                            <label>Album Name</label>
+                                            <input type="text" class="form-control album-name" name = "name" value="{{p.name}}" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Description</label>
+                                            <input type="text" class="form-control album-description" name="description" value="{{p.description}}" required>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                                        <button type="button" class="btn btn-primary update-album" data-album-id="{{p.albumID}}">Update</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {% endfor %}
                     </div>
                 </div>
             </section>
         </div>
         <!--========== END PAGE CONTENT ==========-->
     </div>
+    
     <!-- END WRAPPER -->
     <script type="text/javascript" src="/assets/plugins/bootstrap/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="/assets/plugins/cubeportfolio/js/jquery.cubeportfolio.min.js"></script>
     <script type="text/javascript" src="/assets/scripts/app.js"></script>
     <script type="text/javascript" src="/assets/scripts/portfolio/portfolio-4-col-grid.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.update-album').forEach(function(button) {
+        button.addEventListener('click', function() {
+            var albumID = this.getAttribute('data-album-id');
+            var modal = this.closest('.modal');
+            var name = modal.querySelector('.album-name').value;
+            var description = modal.querySelector('.album-description').value;
+
+            fetch('/updateAlbum/' + albumID, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ name: name, description: description }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Success:', data);
+                location.reload();
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+            });
+        });
+    });
+});
+        </script>
+        
 </body>
 <!-- END BODY -->
 

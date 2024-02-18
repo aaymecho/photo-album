@@ -16,6 +16,10 @@ RDS_DB_NAME='photogallerydb'
 DYNAMODB_TABLE='photogallerydb' #whichever you have mention during the setup
 DYNAMODB_USER_TABLE = 'PhotoGalleryUser'
 
+
+# Misc config
+SES_EMAIL = 'aaymecho3@gatech.edu'
+
 ###### INSERT NEW ENVIRONMENT VARIEABLES HERE ######
 
 

@@ -5,6 +5,8 @@
 <head>
     <meta charset="utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta http-equiv="refresh" content="300; url = /" />
+
     <title>Photo Gallery</title>
     <meta name="viewport" content="width=device-width, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link href='https://fonts.googleapis.com/css?family=Roboto:100,400,700,500,300,300italic' rel='stylesheet' type='text/css'>
@@ -31,7 +33,8 @@
             <center>
                 <h2>Photo Gallery</h2>
                 <h3 style="font-weight: 600;">{{ albumName }}</h3>
-                <br> <a href="/">Home</a> | <a href="/album/{{albumID}}/addPhoto">Add Photo</a>
+                <br> <a href="/">Home</a> | <a href="/album/{{albumID}}/addPhoto">Add Photo</a> | <a href="/album/{{albumID}}/delete">Delete Album</a>
+
                 <br>
                 <br>
                 <div class="container">

@@ -1,13 +1,11 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" class="no-js">
   <!-- HEAD -->
 
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta http-equiv="refresh" content="300; url = /" />
-
-    <title>Photo Gallery</title>
+    <title>Update Photo</title>
     <meta
       name="viewport"
       content="width=device-width, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no"
@@ -23,12 +21,12 @@
       type="text/css"
     />
     <link
-      href="/assets/plugins/bootstrap/css/bootstrap.min.css"
+      href="assets/plugins/bootstrap/css/bootstrap.min.css"
       rel="stylesheet"
       type="text/css"
     />
-    <link href="/assets/css/global.css" rel="stylesheet" type="text/css" />
-    <script type="text/javascript" src="/assets/plugins/jquery.min.js"></script>
+    <link href="assets/css/global.css" rel="stylesheet" type="text/css" />
+    <script type="text/javascript" src="assets/plugins/jquery.min.js"></script>
   </head>
   <!-- END HEAD -->
   <!-- BEGIN BODY -->
@@ -41,9 +39,12 @@
         <br />
         <center>
           <h2>Photo Gallery</h2>
-          <h3 style="font-weight: 600">{{ albumName }}</h3>
           <br />
-          <a href="/">Home</a> | <a href="/album/{{albumID}}">Back to Album </a>
+          <div id="userdata-container"></div>
+          <br />
+          <a href="index.html">Home</a> |
+          <a href="addphoto.html">Add Photo</a> |
+          <a id="logoutlink" href="#">Logout</a>
         </center>
         <!--========== PAGE CONTENT ==========-->
         <div class="content-sm container">
@@ -53,25 +54,20 @@
               <article class="blog-grid margin-b-30">
                 <!-- Blog Grid Content -->
                 <div class="blog-grid-content">
-                  <h2 class="blog-grid-title-lg">Upload Photo</h2>
+                  <h2 class="blog-grid-title-lg">Update Photo</h2>
                   <form
-                    method="post"
-                    action="/album/{{ albumID }}/addPhoto"
+                    method="patch"
+                    action="/updatephoto"
+                    id="updateform"
                     enctype="multipart/form-data"
                   >
-                    <input
-                      type="file"
-                      name="imagefile"
-                      id="imagefile"
-                      class="form-control"
-                    />
-                    <br />
                     <input
                       type="text"
                       name="title"
                       id="title"
                       class="form-control"
                       placeholder="Title"
+                      required
                     />
                     <br />
                     <textarea
@@ -80,6 +76,7 @@
                       class="form-control"
                       rows="3"
                       placeholder=" Description"
+                      required
                     ></textarea>
                     <br />
                     <input
@@ -88,6 +85,7 @@
                       id="tags"
                       class="form-control"
                       placeholder="Tags"
+                      required
                     />
                     <br />
                     <button
@@ -110,11 +108,13 @@
       <!--========== END BACKGROUND COLOR SKY LIGHT ==========-->
     </div>
     <!-- END WRAPPER -->
+
     <script
       type="text/javascript"
-      src="/assets/plugins/bootstrap/js/bootstrap.min.js"
+      src="assets/plugins/bootstrap/js/bootstrap.min.js"
     ></script>
-    <script type="text/javascript" src="/assets/scripts/app.js"></script>
+    <script type="text/javascript" src="assets/scripts/app.js"></script>
+    <script type="text/javascript" src="assets/process.js"></script>
   </body>
   <!-- END BODY -->
 </html>

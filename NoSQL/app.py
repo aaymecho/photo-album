@@ -12,16 +12,25 @@ import uuid
 import json
 import exifread
 import time
-from flask import render_template, redirect
+from flask import render_template, redirect, session
 from flask import Flask, jsonify, abort, request, make_response, url_for
 sys.path.append(os.path.abspath(os.path.join('..', 'utils')))
-from env import AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY, AWS_REGION, PHOTOGALLERY_S3_BUCKET_NAME, DYNAMODB_TABLE, DYNAMODB_USER_TABLE
+from env import AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY, AWS_REGION, PHOTOGALLERY_S3_BUCKET_NAME, DYNAMODB_TABLE, DYNAMODB_USER_TABLE, SES_EMAIL
 from flask_mail import Mail, Message
+from botocore.exceptions import ClientError
+import uuid
+from datetime import timedelta
+
 
 serializer = URLSafeTimedSerializer(AWS_ACCESS_KEY)
 
 app = Flask(__name__, static_url_path="")
+app.secret_key = AWS_ACCESS_KEY
 bcrypt = Bcrypt(app)
+app.permanent_session_lifetime = timedelta(minutes=5)
+
+
+
 
 dynamodb = boto3.resource('dynamodb', aws_access_key_id=AWS_ACCESS_KEY,
                           aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
@@ -30,12 +39,57 @@ dynamodb = boto3.resource('dynamodb', aws_access_key_id=AWS_ACCESS_KEY,
 table = dynamodb.Table(DYNAMODB_TABLE)
 userTable = dynamodb.Table(DYNAMODB_USER_TABLE)
 
-mail = Mail(app)
-
 
 UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'media')
 ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg'])
 
+
+
+
+
+
+def check_user_exist(value):
+    response = userTable.scan(
+        FilterExpression=Attr('username').eq(str(value))
+    )
+    userExist = response['Count'] > 0
+    print(userExist)
+    
+    return userExist
+
+def check_email_exist(value):
+    response = userTable.query(
+            KeyConditionExpression=Key('userEmail').eq(value),
+            )
+    emailExist = response['Count'] > 0
+    print(emailExist)
+    return emailExist
+
+
+def send_email(email, body):
+    try:
+        ses = boto3.client('ses', aws_access_key_id=AWS_ACCESS_KEY,
+                                aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                                region_name=AWS_REGION)
+        response = ses.send_email(
+            Source=SES_EMAIL,
+            Destination={'ToAddresses': [email]},
+            Message={
+                'Subject': {'Data': 'Photo Gallery: Confirm Your Account'},
+                'Body': {
+                    'Text': {'Data': body}
+                }
+            }
+        )
+
+    except ClientError as e:
+        print(e.response['Error']['Message'])
+        return False
+    else:
+        print("Email sent! Message ID:"),
+        print(response['MessageId'])
+
+        return True
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -104,100 +158,127 @@ def not_found(error):
     """
     return make_response(jsonify({'error': 'Not found'}), 404)
 
+@app.route('/deleteAccount', methods=['POST', 'GET'])
+def delete_account():
+    if 'userID' in session:
+        try:
+            userTable.delete_item(
+                Key={
+                    "userEmail": session['userEmail']
+                    }
+                )
+            session.clear()
+            return redirect(url_for('home_page'))
+        except:
+            return {
+                    "userEmail": session['userEmail'][0],
+                    "msg": "Deleting email failed!"
+                    }
+
+    else:
+        redirect(url_for('home_page'))
+            
 
 @app.route('/login', methods=['POST', 'GET'])
 def login():
-    return render_template('login.html')
+    if request.method == 'POST':
+        submitted_email = request.form.get('email')
+        submitted_password = request.form.get('password')
+
+        try:
+            response = userTable.get_item(
+                Key={'userEmail': submitted_email},
+            )
+            user = response.get('Item')
+            if user and user.get('verified') and bcrypt.check_password_hash(user['password'], submitted_password):
+                session['userEmail'] = submitted_email
+                session['userID'] = user['userID']
+                return redirect(url_for('home_page'))
+            else:
+                return render_template('login.html', message="Invalid email or password.")
+        except Exception as e:
+            print(e)
+            return render_template('login.html', message="An error occurred during login.")
+    else:
+        return render_template('login.html')
 
 
-@app.route('/confirmemail', methods=['GET'])
-def confirm_page():
-    return render_template('confirmemail.html')
-
-
-@app.route('/confirmemail/<token>', methods=['GET', 'POST'])
+@app.route('/confirmemail/<token>')
 def confirm_email(token):
-    message = ''
     try:
-        email = serializer.loads(token, salt='confirm-email', max_age=30)
+        email = serializer.loads(token, salt='confirmemail', max_age=600)
+        userTable.update_item(
+            Key={
+                'userEmail': email
+            },
+            UpdateExpression="set verified = :v",
+            ExpressionAttributeValues={
+                ':v': True
+            },
+            ReturnValues="UPDATED_NEW"
+        )
+        return redirect(url_for('login'))
+    except (BadSignature):
+        return render_template('confirmemail.html', message="Confirmation link is invalid!")
     except SignatureExpired:
-        message = 'faild'
-        app.logger.info(message)
-    except BadSignature:
-        message = 'ewwwww'
-        app.logger.info(message)
-    return render_template('confirmemail.html')
+        return render_template('confirmemail.html', message="Confirmation link has expired!")
+
+
+
 
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     if request.method == 'POST':
-        username = request.form['username']
-        email = request.form['email']
-        password = request.form['password']
-
-        # Generate hashed password and hashed username
-        hashedPassword = bcrypt.generate_password_hash(
-            password).decode('utf-8')
-        hashedUsername = bcrypt.generate_password_hash(
-            username).decode('utf-8')
+        username = request.form.get('username')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        hashedPassword = bcrypt.generate_password_hash(password).decode('utf-8')
+        userID = uuid.uuid4()
+        message = ""
 
         try:
-            # Attempt to retrieve user by hashed username
-            response = userTable.get_item(
-                Key={
-                    "userID": hashedUsername,
-                    "userEmail": email
-                }
-            )
-            # Check if the user exists by looking for an item in the response
-            if 'Item' in response:
-                app.logger.info(
-                    "Account with username %s already exists!", username)
-                # Redirect or inform the user that the account exists
-                return render_template('signup.html', error="Username already exists.")
+            emailExist = check_email_exist(email)
+            userIDExist = check_user_exist(username)
+
+            if emailExist or userIDExist:
+                message = "An account with this username or email already exists."
+                return render_template('signup.html', message=message)
             else:
-                # If user does not exist, proceed to create a new one
-                token = serializer.dumps(email, salt='confirm-email')
                 userTable.put_item(
                     Item={
-                        "userID": hashedUsername,
                         "userEmail": email,
+                        "userID": str(userID),
                         "username": username,
                         "password": hashedPassword,
                         "verified": False
                     }
                 )
-                msg = Message('Confirm Email', sender='aaymecho3@gatech.edu', recipients=[email])
-                msg.body = 'Your code is : ' + hashedUsername
-                mail.send(msg)
-                return redirect("confirmemail/")
+
+                token = serializer.dumps(email, salt='confirmemail')
+                link = url_for('confirm_email', token=token, _external=True)
+                send_email(email, body=f"Please click on the link to confirm your email: {link}")
+                return render_template("confirmemail.html", message="You've been sent an email to confirm your account!")
         except Exception as e:
             app.logger.error("Signup error: %s", str(e))
-            # Handle the exception and inform the user
-            return render_template('signup.html', error="An error occurred during signup.")
+            return render_template('signup.html', error="An error occurred during signup. Please try again.")
     else:
         return render_template('signup.html')
 
-
 @app.route('/', methods=['GET'])
 def home_page():
-    """ Home page route.
+    if 'userID' in session:
+        response = table.scan(FilterExpression=Attr('photoID').eq("thumbnail"))
+        results = response['Items']
+        for index, item in enumerate(results):
+            createdAt = datetime.strptime(str(item['createdAt']), "%Y-%m-%d %H:%M:%S")
+            createdAt_UTC = pytz.timezone("UTC").localize(createdAt)
+            results[index]['createdAt'] = createdAt_UTC.astimezone(pytz.timezone("US/Eastern")).strftime("%B %d, %Y")
+        return render_template('index.html', albums=results)
+    else:
+        session.clear()
+        return redirect(url_for('login'))
 
-    get:
-        description: Endpoint to return home page.
-        responses: Returns all the albums.
-    """
-    response = table.scan(FilterExpression=Attr('photoID').eq("thumbnail"))
-    results = response['Items']
-
-    # if len(results) > 0:
-    #     for index, value in enumerate(results):
-    #         createdAt = datetime.strptime(str(results[index]['createdAt']), "%Y-%m-%d %H:%M:%S")
-    #         createdAt_UTC = pytz.timezone("UTC").localize(createdAt)
-    #         results[in.infodex]['createdAt'] = createdAt_UTC.astimezone(pytz.timezone("US/Eastern")).strftime("%B %d, %Y")
-
-    return render_template('login.html', albums=results)
 
 
 @app.route('/createAlbum', methods=['GET', 'POST'])
@@ -212,164 +293,214 @@ def add_album():
         description: Endpoint to send new album.
         responses: Returns user to home page.
     """
-    if request.method == 'POST':
-        uploadedFileURL = ''
-        file = request.files['imagefile']
-        name = request.form['name']
-        description = request.form['description']
+    if 'userEmail' in session:
+        if request.method == 'POST':
+            uploadedFileURL = '' 
+            file = request.files['imagefile']
+            name = request.form['name']
+            description = request.form['description']
 
-        if file and allowed_file(file.filename):
-            albumID = uuid.uuid4()
+            if file and allowed_file(file.filename):
+                albumID = session['userID']
+                print("Stored albumID: " + albumID)
 
-            filename = file.filename
-            filenameWithPath = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(filenameWithPath)
+                filename = file.filename
+                filenameWithPath = os.path.join(UPLOAD_FOLDER, filename)
+                file.save(filenameWithPath)
 
-            uploadedFileURL = s3uploading(
-                str(albumID), filenameWithPath, "thumbnails")
+                uploadedFileURL = s3uploading(
+                    str(albumID), filenameWithPath, "thumbnails")
 
-            createdAtlocalTime = datetime.now().astimezone()
-            createdAtUTCTime = createdAtlocalTime.astimezone(pytz.utc)
+                createdAtlocalTime = datetime.now().astimezone()
+                createdAtUTCTime = createdAtlocalTime.astimezone(pytz.utc)
 
-            table.put_item(
-                Item={
-                    "albumID": str(albumID),
-                    "photoID": "thumbnail",
-                    "name": name,
-                    "description": description,
-                    "thumbnailURL": uploadedFileURL,
-                    "createdAt": createdAtUTCTime.strftime("%Y-%m-%d %H:%M:%S")
-                }
-            )
+                table.put_item(
+                    Item={
+                        "albumID": str(albumID),
+                        "photoID": "thumbnail",
+                        "name": name,
+                        "description": description,
+                        "thumbnailURL": uploadedFileURL,
+                        "createdAt": createdAtUTCTime.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                )
 
-        return redirect('/')
+            return redirect('/')
+        else:
+            return render_template('albumForm.html')
     else:
-        return render_template('albumForm.html')
+        return redirect(url_for('login'))
 
 
-@app.route('/album/<string:albumID>', methods=['GET'])
-def view_photos(albumID):
-    """ Album page route.
+@app.route('/updateAlbum/<string:albumID>', methods=['PATCH'])
+def update_album(albumID):
+    data = request.json
+    new_name = data.get('name')
+    new_description = data.get('description')
+    print("name: " + new_name + " Description: " + new_description)
 
-    get:
-        description: Endpoint to return an album.
-        responses: Returns all the photos of a particular album.
-    """
-    albumResponse = table.query(KeyConditionExpression=Key(
-        'albumID').eq(albumID) & Key('photoID').eq('thumbnail'))
-    albumMeta = albumResponse['Items']
+    response = table.update_item(
+        Key={
+            'albumID': albumID,
+            'photoID': 'thumbnail'
+        },
+        UpdateExpression='SET #nm = :n, description = :d',
+        ExpressionAttributeNames={
+            '#nm': 'name'
+        },
+        ExpressionAttributeValues={
+            ':n': new_name,
+            ':d': new_description
+        },
+        ReturnValues="UPDATED_NEW"
+    )
 
-    response = table.scan(FilterExpression=Attr('albumID').eq(
-        albumID) & Attr('photoID').ne('thumbnail'))
-    items = response['Items']
+    updated_attributes = response.get('Attributes', {})
+    if updated_attributes:
+        return jsonify({
+            'success': True,
+            'message': 'Album updated successfully.',
+            'updatedAlbum': updated_attributes
+        }), 200
+    else:
+        return jsonify({
+            'success': False,
+            'message': 'Failed to update album.'
+        }), 400
 
-    return render_template('viewphotos.html', photos=items, albumID=albumID, albumName=albumMeta[0]['name'])
+
+
 
 
 @app.route('/album/<string:albumID>/addPhoto', methods=['GET', 'POST'])
 def add_photo(albumID):
-    """ Create new photo under album route.
+    if 'userID' in session:
+        if request.method == 'POST':
+            uploadedFileURL = ''
+            file = request.files['imagefile']
+            title = request.form['title']
+            description = request.form['description']
+            tags = request.form['tags']
+            if file and allowed_file(file.filename):
+                photoID = uuid.uuid4()
+                filename = file.filename
+                filenameWithPath = os.path.join(UPLOAD_FOLDER, filename)
+                file.save(filenameWithPath)
 
-    get:
-        description: Endpoint to return form to create a new photo.
-        responses: Returns all the fields needed to store a new photo.
+                uploadedFileURL = s3uploading(filename, filenameWithPath)
 
-    post:
-        description: Endpoint to send new photo.
-        responses: Returns user to album page.
-    """
-    if request.method == 'POST':
-        uploadedFileURL = ''
-        file = request.files['imagefile']
-        title = request.form['title']
-        description = request.form['description']
-        tags = request.form['tags']
-        if file and allowed_file(file.filename):
-            photoID = uuid.uuid4()
-            filename = file.filename
-            filenameWithPath = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(filenameWithPath)
+                ExifData = getExifData(filenameWithPath)
+                ExifDataStr = json.dumps(ExifData)
 
-            uploadedFdfghjuytyuileURL = s3uploading(filename, filenameWithPath)
+                createdAtlocalTime = datetime.now().astimezone()
+                updatedAtlocalTime = datetime.now().astimezone()
 
-            ExifData = getExifData(filenameWithPath)
-            ExifDataStr = json.dumps(ExifData)
+                createdAtUTCTime = createdAtlocalTime.astimezone(pytz.utc)
+                updatedAtUTCTime = updatedAtlocalTime.astimezone(pytz.utc)
 
-            createdAtlocalTime = datetime.now().astimezone()
-            updatedAtlocalTime = datetime.now().astimezone()
+                table.put_item(
+                    Item={
+                        "albumID": str(albumID),
+                        "photoID": str(photoID),
+                        "title": title,
+                        "description": description,
+                        "tags": tags,
+                        "photoURL": uploadedFileURL,
+                        "EXIF": ExifDataStr,
+                        "createdAt": createdAtUTCTime.strftime("%Y-%m-%d %H:%M:%S"),
+                        "updatedAt": updatedAtUTCTime.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                )
 
-            createdAtUTCTime = createdAtlocalTime.astimezone(pytz.utc)
-            updatedAtUTCTime = updatedAtlocalTime.astimezone(pytz.utc)
+            return redirect(f'''/album/{albumID}''')
 
-            table.put_item(
-                Item={
-                    "albumID": str(albumID),
-                    "photoID": str(photoID),
-                    "title": title,
-                    "description": description,
-                    "tags": tags,
-                    "photoURL": uploadedFileURL,
-                    "EXIF": ExifDataStr,
-                    "createdAt": createdAtUTCTime.strftime("%Y-%m-%d %H:%M:%S"),
-                    "updatedAt": updatedAtUTCTime.strftime("%Y-%m-%d %H:%M:%S")
-                }
+        else:
+
+            albumResponse = table.query(KeyConditionExpression=Key(
+                'albumID').eq(albumID) & Key('photoID').eq('thumbnail'))
+            albumMeta = albumResponse['Items']
+
+            return render_template('photoForm.html', albumID=albumID, albumName=albumMeta[0]['name'])
+    else:
+        return redirect(url_for('home_page'))
+
+
+@app.route('/album/<string:albumID>/photo/<string:photoID>', methods=['GET', 'PATCH', 'DELETE'])
+def view_photo(albumID, photoID):
+    if 'userID' in session:
+        if request.method == 'GET':
+            albumResponse = table.query(KeyConditionExpression=Key(
+                'albumID').eq(albumID) & Key('photoID').eq('thumbnail'))
+            albumMeta = albumResponse['Items']
+
+            response = table.query(KeyConditionExpression=Key(
+                'albumID').eq(albumID) & Key('photoID').eq(photoID))
+            results = response['Items']
+
+            if len(results) > 0:
+                photo = {}
+                photo['photoID'] = results[0]['photoID']
+                photo['title'] = results[0]['title']
+                photo['description'] = results[0]['description']
+                photo['tags'] = results[0]['tags']
+                photo['photoURL'] = results[0]['photoURL']
+                photo['EXIF'] = json.loads(results[0]['EXIF'])
+
+                createdAt = datetime.strptime(
+                    str(results[0]['createdAt']), "%Y-%m-%d %H:%M:%S")
+                updatedAt = datetime.strptime(
+                    str(results[0]['updatedAt']), "%Y-%m-%d %H:%M:%S")
+
+                createdAt_UTC = pytz.timezone("UTC").localize(createdAt)
+                updatedAt_UTC = pytz.timezone("UTC").localize(updatedAt)
+
+                photo['createdAt'] = createdAt_UTC.astimezone(
+                    pytz.timezone("US/Eastern")).strftime("%B %d, %Y")
+                photo['updatedAt'] = updatedAt_UTC.astimezone(
+                    pytz.timezone("US/Eastern")).strftime("%B %d, %Y")
+
+                tags = photo['tags'].split(',')
+                exifdata = photo['EXIF']
+
+                return render_template('photodetail.html', photo=photo, tags=tags, exifdata=exifdata, albumID=albumID, albumName=albumMeta[0]['name'])
+            else:
+                return render_template('photodetail.html', photo={}, tags=[], exifdata={}, albumID=albumID, albumName="")
+        elif request.method == 'PATCH':
+            newTitle = request.form['title']
+            newDescription = request.form['description']
+            newTags = request.form['tags']
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            response = table.update_item(
+                Key={
+                    'albumID': albumID,
+                    'photoID': photoID
+                },
+                UpdateExpression="SET title = :title, description = :description, tags = :tags, updatedAt = :updatedAt",
+                ExpressionAttributeValues={
+                    ':title': newTitle,
+                    ':description': newDescription,
+                    ':tags': newTags,
+                    ':updatedAt': now
+                },
+                ReturnValues="UPDATED_NEW"
             )
 
-        return redirect(f'''/album/{albumID}''')
+            return jsonify({'message': 'Photo updated successfully', 'status': 'success'}), 200
+        elif request.method == 'DELETE':
+            try:
+                response = table.delete_item(
+                    Key={'albumID': albumID,
+                        'photoID': photoID
+                        }
+                )
+                return jsonify({'success': True, 'redirect_url': url_for('home_page')}), 200
+            except Exception as e:
+                print(e)
+                return jsonify({'error': 'An error occurred'}), 500
+        else:
+            return redirect(url_for('home_page'))
 
-    else:
-
-        albumResponse = table.query(KeyConditionExpression=Key(
-            'albumID').eq(albumID) & Key('photoID').eq('thumbnail'))
-        albumMeta = albumResponse['Items']
-
-        return render_template('photoForm.html', albumID=albumID, albumName=albumMeta[0]['name'])
-
-
-@app.route('/album/<string:albumID>/photo/<string:photoID>', methods=['GET'])
-def view_photo(albumID, photoID):
-    """ photo page route.
-
-    get:
-        description: Endpoint to return a photo.
-        responses: Returns a photo from a particular album.
-    """
-    albumResponse = table.query(KeyConditionExpression=Key(
-        'albumID').eq(albumID) & Key('photoID').eq('thumbnail'))
-    albumMeta = albumResponse['Items']
-
-    response = table.query(KeyConditionExpression=Key(
-        'albumID').eq(albumID) & Key('photoID').eq(photoID))
-    results = response['Items']
-
-    if len(results) > 0:
-        photo = {}
-        photo['photoID'] = results[0]['photoID']
-        photo['title'] = results[0]['title']
-        photo['description'] = results[0]['description']
-        photo['tags'] = results[0]['tags']
-        photo['photoURL'] = results[0]['photoURL']
-        photo['EXIF'] = json.loads(results[0]['EXIF'])
-
-        createdAt = datetime.strptime(
-            str(results[0]['createdAt']), "%Y-%m-%d %H:%M:%S")
-        updatedAt = datetime.strptime(
-            str(results[0]['updatedAt']), "%Y-%m-%d %H:%M:%S")
-
-        createdAt_UTC = pytz.timezone("UTC").localize(createdAt)
-        updatedAt_UTC = pytz.timezone("UTC").localize(updatedAt)
-
-        photo['createdAt'] = createdAt_UTC.astimezone(
-            pytz.timezone("US/Eastern")).strftime("%B %d, %Y")
-        photo['updatedAt'] = updatedAt_UTC.astimezone(
-            pytz.timezone("US/Eastern")).strftime("%B %d, %Y")
-
-        tags = photo['tags'].split(',')
-        exifdata = photo['EXIF']
-
-        return render_template('photodetail.html', photo=photo, tags=tags, exifdata=exifdata, albumID=albumID, albumName=albumMeta[0]['name'])
-    else:
-        return render_template('photodetail.html', photo={}, tags=[], exifdata={}, albumID=albumID, albumName="")
 
 
 @app.route('/album/search', methods=['GET'])
@@ -398,15 +529,46 @@ def search_album_page():
 
     return render_template('searchAlbum.html', albums=items, searchquery=query)
 
+@app.route('/album/<albumID>/delete', methods=['GET'])
+def delete_album(albumID):
+    # Query to find all photos with the given albumID
+    response = table.query(
+        KeyConditionExpression='albumID = :albumID',
+        ExpressionAttributeValues={
+            ':albumID': albumID
+        }
+    )
+
+    # Iterate over the items and delete them one by one
+    for item in response['Items']:
+        table.delete_item(
+            Key={
+                'albumID': item['albumID'],
+                'photoID': item['photoID'] 
+            }
+        )
+    return redirect(url_for('home_page'))
+
+
+
+@app.route('/album/<string:albumID>', methods=['GET'])
+def view_photos(albumID):
+    """ Album page route.
+
+    get:
+        description: Endpoint to return an album.
+        responses: Returns all the photos of a particular album.
+    """
+    albumResponse = table.query(KeyConditionExpression=Key('albumID').eq(albumID) & Key('photoID').eq('thumbnail'))
+    albumMeta = albumResponse['Items']
+
+    response = table.scan(FilterExpression=Attr('albumID').eq(albumID) & Attr('photoID').ne('thumbnail'))
+    items = response['Items']
+
+    return render_template('viewphotos.html', photos=items, albumID=albumID, albumName=albumMeta[0]['name'])
 
 @app.route('/album/<string:albumID>/search', methods=['GET'])
 def search_photo_page(albumID):
-    """ search photo page route.
-
-    get:
-        description: Endpoint to return all the matching photos.
-        responses: Returns all the photos from an album based on a particular query.
-    """
     query = request.args.get('query', None)
 
     response = table.scan(FilterExpression=Attr('title').contains(query) | Attr(

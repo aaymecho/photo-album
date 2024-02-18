@@ -1,13 +1,14 @@
 CREATE TABLE `User` (
-  `userID` varchar(100) NOT NULL,
-  `email` TEXT NOT NULL, 
-  `firstName` TEXT NOT NULL, 
-  `lastName` TEXT NOT NULL, 
+  `userID` VARCHAR(100) NOT NULL,
+  `email` VARCHAR(255) NOT NULL,
+  `firstName` VARCHAR(255) NOT NULL,
+  `lastName` VARCHAR(255) NOT NULL,
   `password` TEXT NOT NULL,
   `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updatedAt` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`email`)
 );
+
 
 CREATE TABLE `Album` (
   `albumID` varchar(100) NOT NULL,

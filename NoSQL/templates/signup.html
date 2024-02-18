@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en" class="no-js">
   <!-- HEAD -->
 
@@ -40,7 +40,11 @@
         <center>
           <h2>Photo Gallery</h2>
           <br />
-          <div id="message"></div>
+          {% if message %}
+          <div id="message" name="message" class="alert alert-warning">
+            {{ message }}
+          </div>
+          {% endif %}
           <div id="messageaction"></div>
         </center>
         <!--========== PAGE CONTENT ==========-->
@@ -68,6 +72,7 @@
                       id="email"
                       class="form-control"
                       placeholder="Enter email"
+                      required
                     />
                     <br />
                     <input
